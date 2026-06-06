@@ -2,12 +2,15 @@ import os
 import json
 import base64
 import tempfile
+import streamlit as st
 from pathlib import Path
 from groq import Groq
 from dotenv import load_dotenv
 
 load_dotenv()
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+api_key = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY")
+client = Groq(api_key=api_key)
 
 # Best available Groq vision model (as of June 2026)
 VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
