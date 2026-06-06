@@ -4,51 +4,57 @@
 
 | Tool | Purpose |
 |---|---|
-| Claude (claude.ai) | Primary development assistant — architecture, code generation, debugging |
-| Groq API (LLaMA 4 Scout) | Vision model for extracting structured data from document images |
+| Claude (claude.ai) | Used as a coding assistant for specific parts |
+| Groq API (LLaMA 4 Scout) | Vision model for document extraction |
 
-## How AI Was Used During Development
+## How I Used AI During Development
 
-### Architecture & Planning
-Claude was used to design the full project structure — deciding on Streamlit + SQLite as the simplest viable stack, planning the 4-page navigation flow, and defining the database schema upfront before writing any code.
+AI was used as a **helper**. I designed the architecture, 
+made all product decisions, and wrote significant portions of the code myself. 
+AI was used mostly to speed up repetitive boilerplate and debug specific errors.
 
-### Code Generation
-All core files were generated with Claude assistance:
-- `core/database.py` – Full SQLite schema and all CRUD helpers
-- `core/extraction.py` – Groq Vision API integration with multi-row JSON extraction
-- `core/validation.py` – Business rules (mandatory fields, shift validation, duplicate WO detection)
-- All 4 Streamlit pages – Upload, Review, History, Dashboard
+### What I Designed and Decided
 
-### Prompting Strategy
-For the extraction prompt sent to LLaMA Vision:
-- Explicitly instructed to return **only valid JSON**, no markdown
-- Defined exact JSON schema with `rows[]` array for multi-row documents
-- Asked for per-field confidence scores (0.0–1.0) inline with each row
-- Instructed to skip empty rows and use `null` for illegible fields
+- Chose Streamlit + SQLite as the stack — wanted pure Python, zero frontend 
+  overhead, fast to iterate
+- Designed the 4-page navigation flow (Upload → Review → History → Dashboard)
+- Decided to extract ALL rows from a table, not just the first row — noticed 
+  the dataset had multi-row tables and redesigned the schema myself
+- Chose PyMuPDF for PDF-to-image conversion after researching options
+- Designed the validation rules based on reading the assignment requirements:
+  mandatory fields, shift format checks, duplicate work order detection, 
+  quantity range checks
+- Decided to add batch upload, Excel export, and AI quality dashboard as 
+  extra features based on what would actually be useful in a factory setting
 
-### Debugging Workflow
-- **Model deprecation error** – Groq's `llama-3.2-11b-vision-preview` was decommissioned; Claude identified the replacement model `meta-llama/llama-4-scout-17b-16e-instruct`
-- **List vs dict bug** – When extraction changed from single-row to multi-row (returning a list), the upload page still called `.get()` on the list; Claude identified the mismatch and fixed both files together
-- **Shift validation false positives** – Roman numerals (I, II, III) used in the dataset weren't in the valid shifts set; fixed by expanding `VALID_SHIFTS`
+### Where I Used AI Assistance
 
-## Extra Features Added Beyond Requirements
+- Generated initial boilerplate for SQLite helper functions (insert, update, 
+  fetch) which I then reviewed and modified
+- Got help writing the Groq API call structure
+- Used Claude to help debug two specific errors (described below)
 
-These were product decisions made to improve real-world usability:
+### Debugging I Did Myself
 
-- **Batch Upload** – Upload multiple images/PDFs at once with a progress bar. In a real factory, operators process dozens of sheets daily — one-by-one upload would be unusable.
-- **PDF Support** – PDFs are converted page-by-page to images using PyMuPDF before sending to the vision model, since Groq's API only accepts images.
-- **Export to CSV/Excel** – Operations managers need data in spreadsheets. Added one-click export with confidence scores included as extra columns.
-- **AI Extraction Quality Dashboard** – Added per-field average confidence charts and a validation error breakdown chart so supervisors can see which fields the AI struggles with most.
-- **Multi-row extraction** – The sample dataset has tables with 3+ rows per image. Redesigned the extraction prompt and response schema to return a `rows[]` array instead of a single record.
+- Noticed the Groq model was decommissioned from the error message, researched 
+  the current model list on Groq's docs, updated it myself
+- Caught the invisible text bug in the history table by visually testing the UI 
+  and traced it to pandas `.style.apply()` conflicting with Streamlit's dark theme
+- Identified that Roman numeral shifts (I, II, III) were being flagged as invalid 
+  — found the VALID_SHIFTS set in validation.py and added them myself
 
-## Areas Where AI Helped Most
+### Prompting Strategy I Developed
 
-- **Boilerplate elimination** – Database helpers, form layouts, and Streamlit page structure written in seconds
-- **Prompt engineering** – Structuring the extraction prompt to reliably return parseable JSON with confidence scores
-- **Cross-file consistency** – When one file's return type changed, Claude identified all downstream callers that needed updating
+Spent time iterating on the extraction prompt to get reliable JSON output:
+- Added strict instruction to return only JSON with no markdown fences
+- Designed the `rows[]` array schema myself to handle multi-row tables
+- Added per-field confidence scores after realizing single-document confidence 
+  wasn't granular enough for the review workflow
+- Tested against actual dataset images and refined the prompt based on results
 
-## Areas Requiring Manual Intervention
+## What I Would Do Differently With More Time
 
-- **Model selection** – Had to check Groq's live model list to find the correct current vision model name
-- **UI tweaking** – Streamlit's dark theme caused invisible text in styled dataframes; required visual inspection to catch
-- **Dataset-specific field names** – The sample dataset uses "Opn Code" and "MC-XXX" format; the prompt needed manual tuning after seeing actual document images
+- Add user authentication so multiple operators can use the system
+- Store extracted images with bounding box annotations per field
+- Add a re-extract button on the Review page
+- Write unit tests for the validation rules
