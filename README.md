@@ -85,3 +85,6 @@ biztel-ai/
 - **Single file per upload** – Each image is processed independently; multi-page PDFs not supported in this version
 - **Roman numeral shifts (I/II/III)** – Supported in addition to A/B/C and Morning/Afternoon/Night
 - **Duplicate WO detection** – Warns but does not block saving (operator may override)
+
+## 🚀 Live Demo
+[https://ai-powered-workflow-automation.streamlit.app](https://ai-powered-workflow-automation.streamlit.app)
