@@ -1,169 +1,149 @@
 import streamlit as st
 import pandas as pd
-import io
-from core.database import search_records, get_connection
+from core.database import get_dashboard_stats, get_all_records
 
-st.set_page_config(page_title="History", page_icon="📋", layout="wide")
-st.title("📋 Search & History")
+st.set_page_config(page_title="Dashboard", page_icon="📊", layout="wide")
+st.title("📊 Operations Dashboard")
 
-# ── Sidebar tools ────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("### 🗑️ Database Tools")
-    if st.button("Clear All Records", type="secondary", use_container_width=True):
-        conn = get_connection()
-        conn.execute("DELETE FROM records")
-        conn.execute("DELETE FROM uploads")
-        conn.commit()
-        conn.close()
-        st.success("All records cleared!")
-        st.rerun()
+stats = get_dashboard_stats()
+records = get_all_records()
 
-# ── Filters ──────────────────────────────────────────────────────
-col1, col2, col3 = st.columns(3)
-with col1:
-    keyword = st.text_input("🔍 Search", placeholder="Work order, machine, employee...")
-with col2:
-    shift_filter = st.selectbox("Shift", ["All", "I", "II", "III", "Morning", "Afternoon", "Night", "A", "B", "C"])
-with col3:
-    reviewed_filter = st.selectbox("Status", ["All", "Reviewed", "Pending"])
+if not records:
+    st.info("No records yet. Upload and process some documents to see analytics.")
+    st.stop()
 
-records = search_records(keyword, shift_filter, reviewed_filter)
-st.markdown(f"**{len(records)} record(s) found**")
-
-# ── Export buttons ───────────────────────────────────────────────
-if records:
-    ecol1, ecol2 = st.columns(2)
-
-    # Build export dataframe
-    export_rows = []
-    for r in records:
-        scores = r.get("confidence_scores", {})
-        errors = r.get("validation_errors", [])
-        export_rows.append({
-            "Record ID": r["id"],
-            "File": r.get("filename", ""),
-            "Date": r.get("date") or "",
-            "Shift": r.get("shift") or "",
-            "Employee Number": r.get("employee_number") or "",
-            "Operation Code": r.get("operation_code") or "",
-            "Machine Number": r.get("machine_number") or "",
-            "Work Order Number": r.get("work_order_number") or "",
-            "Quantity Produced": r.get("quantity_produced") or "",
-            "Time Taken (hrs)": r.get("time_taken") or "",
-            "Status": "Reviewed" if r.get("is_reviewed") else "Pending",
-            "Validation Issues": len(errors),
-            "Issue Details": "; ".join(errors) if errors else "",
-            "Conf: Date": scores.get("date", ""),
-            "Conf: Shift": scores.get("shift", ""),
-            "Conf: Employee": scores.get("employee_number", ""),
-            "Conf: Machine": scores.get("machine_number", ""),
-            "Conf: Work Order": scores.get("work_order_number", ""),
-            "Conf: Qty": scores.get("quantity_produced", ""),
-        })
-
-    export_df = pd.DataFrame(export_rows)
-
-    with ecol1:
-        # CSV export
-        csv_data = export_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="⬇️ Export as CSV",
-            data=csv_data,
-            file_name="biztel_records.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-
-    with ecol2:
-        # Excel export
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-            export_df.to_excel(writer, index=False, sheet_name="Records")
-            # Auto-size columns
-            ws = writer.sheets["Records"]
-            for col in ws.columns:
-                max_len = max(len(str(cell.value or "")) for cell in col)
-                ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 40)
-        buffer.seek(0)
-        st.download_button(
-            label="⬇️ Export as Excel (.xlsx)",
-            data=buffer,
-            file_name="biztel_records.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
+# ── KPI Row 1: Core counts ────────────────────────────────────────
+st.subheader("Overview")
+k1, k2, k3, k4 = st.columns(4)
+k1.metric("📁 Total Uploads", stats["total_uploads"])
+k2.metric("📝 Records Extracted", stats["total_records"])
+k3.metric("✔️ Reviewed", stats["reviewed"],
+          delta=f"{stats['total_records']-stats['reviewed']} pending",
+          delta_color="inverse")
+k4.metric("⚠️ Validation Failures", stats["validation_failures"],
+          delta=f"{stats['validation_failures']/max(stats['total_records'],1)*100:.0f}% of records",
+          delta_color="inverse")
 
 st.divider()
 
-# ── Table view ───────────────────────────────────────────────────
-if not records:
-    st.info("No records match your filters.")
-else:
-    rows = []
-    for r in records:
-        errors = r.get("validation_errors", [])
-        rows.append({
-            "ID": r["id"],
-            "File": r.get("filename", "—"),
-            "Date": r.get("date") or "—",
-            "Shift": r.get("shift") or "—",
-            "Employee": r.get("employee_number") or "—",
-            "Machine": r.get("machine_number") or "—",
-            "Work Order": r.get("work_order_number") or "—",
-            "Qty": r.get("quantity_produced") or "—",
-            "Time (h)": r.get("time_taken") or "—",
-            "Status": "✔️ Reviewed" if r.get("is_reviewed") else "⏳ Pending",
-            "⚠️ Issues": len(errors),
-        })
+# ── KPI Row 2: AI accuracy stats ─────────────────────────────────
+st.subheader("🤖 AI Extraction Quality")
 
-    df = pd.DataFrame(rows)
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "ID": st.column_config.NumberColumn(width="small"),
-            "File": st.column_config.TextColumn(width="medium"),
-            "Date": st.column_config.TextColumn(width="small"),
-            "Shift": st.column_config.TextColumn(width="small"),
-            "Employee": st.column_config.TextColumn(width="medium"),
-            "Machine": st.column_config.TextColumn(width="medium"),
-            "Work Order": st.column_config.TextColumn(width="medium"),
-            "Qty": st.column_config.NumberColumn(width="small"),
-            "Time (h)": st.column_config.NumberColumn(width="small"),
-            "Status": st.column_config.TextColumn(width="medium"),
-            "⚠️ Issues": st.column_config.NumberColumn(width="small"),
-        }
-    )
+all_scores = []
+field_score_sums = {}
+field_score_counts = {}
+fields = ["date","shift","employee_number","operation_code","machine_number","work_order_number","quantity_produced","time_taken"]
 
-    # ── Detail view ───────────────────────────────────────────────
-    st.divider()
-    st.subheader("Record Details")
-    record_ids = {f"ID {r['id']} — {r.get('filename','')} | {r.get('date','?')} Shift {r.get('shift','?')}": r["id"] for r in records}
-    selected = st.selectbox("Select a record to view details:", list(record_ids.keys()))
-    sel_id = record_ids[selected]
-    sel_record = next(r for r in records if r["id"] == sel_id)
+for r in records:
+    scores = r.get("confidence_scores", {})
+    for f in fields:
+        s = scores.get(f)
+        if s is not None:
+            all_scores.append(s)
+            field_score_sums[f] = field_score_sums.get(f, 0) + s
+            field_score_counts[f] = field_score_counts.get(f, 0) + 1
 
-    fields = [
-        ("Date", "date"), ("Shift", "shift"),
-        ("Employee #", "employee_number"), ("Operation Code", "operation_code"),
-        ("Machine #", "machine_number"), ("Work Order #", "work_order_number"),
-        ("Qty Produced", "quantity_produced"), ("Time Taken", "time_taken"),
-    ]
-    col1, col2 = st.columns(2)
-    for i, (label, key) in enumerate(fields):
-        val = sel_record.get(key)
-        score = sel_record.get("confidence_scores", {}).get(key, None)
-        badge = ""
-        if score is not None:
-            badge = f" {'🟢' if score>=0.85 else '🟡' if score>=0.60 else '🔴'} {score:.0%}"
-        with (col1 if i % 2 == 0 else col2):
-            st.metric(label=f"{label}{badge}", value=str(val) if val else "—")
+avg_conf = sum(all_scores) / len(all_scores) if all_scores else 0
+high_conf = sum(1 for s in all_scores if s >= 0.85)
+low_conf  = sum(1 for s in all_scores if s < 0.60)
 
-    errors = sel_record.get("validation_errors", [])
-    if errors:
-        st.warning("**Validation Issues:**")
-        for e in errors:
-            st.write(f"  • {e}")
+a1, a2, a3, a4 = st.columns(4)
+a1.metric("Avg Confidence", f"{avg_conf:.0%}")
+a2.metric("🟢 High Confidence Fields", f"{high_conf/max(len(all_scores),1)*100:.0f}%")
+a3.metric("🔴 Low Confidence Fields", f"{low_conf/max(len(all_scores),1)*100:.0f}%")
+
+# Most problematic field
+if field_score_sums:
+    worst_field = min(field_score_sums, key=lambda f: field_score_sums[f]/max(field_score_counts.get(f,1),1))
+    worst_avg = field_score_sums[worst_field] / field_score_counts[worst_field]
+    a4.metric("🔴 Hardest Field to Read", worst_field.replace("_"," ").title(), delta=f"{worst_avg:.0%} avg conf", delta_color="inverse")
+
+# Per-field confidence bar chart
+field_avgs = {
+    f.replace("_"," ").title(): round(field_score_sums[f]/field_score_counts[f], 3)
+    for f in fields if f in field_score_sums
+}
+df_conf = pd.DataFrame({"Field": list(field_avgs.keys()), "Avg Confidence": list(field_avgs.values())})
+st.bar_chart(df_conf.set_index("Field"), height=220)
+
+st.divider()
+
+# ── Operational summaries ─────────────────────────────────────────
+col_left, col_right = st.columns(2)
+
+with col_left:
+    st.subheader("🔄 Shift-wise Summary")
+    if stats["shift_summary"]:
+        df_shift = pd.DataFrame(stats["shift_summary"])
+        df_shift.columns = ["Shift", "Records", "Total Qty"]
+        df_shift["Avg Qty"] = (df_shift["Total Qty"] / df_shift["Records"]).round(1)
+        st.dataframe(df_shift, use_container_width=True, hide_index=True)
+        st.bar_chart(df_shift.set_index("Shift")["Total Qty"], height=200)
     else:
-        st.success("✅ No validation issues.")
+        st.info("No shift data available.")
+
+with col_right:
+    st.subheader("🏭 Machine-wise Summary")
+    if stats["machine_summary"]:
+        df_machine = pd.DataFrame(stats["machine_summary"])
+        df_machine.columns = ["Machine", "Records", "Total Qty"]
+        df_machine["Avg Qty"] = (df_machine["Total Qty"] / df_machine["Records"]).round(1)
+        st.dataframe(df_machine, use_container_width=True, hide_index=True)
+        st.bar_chart(df_machine.set_index("Machine")["Total Qty"], height=200)
+    else:
+        st.info("No machine data available.")
+
+st.divider()
+
+# ── Validation error breakdown ────────────────────────────────────
+st.subheader("🔍 Most Common Validation Issues")
+error_counts = {}
+for r in records:
+    for e in r.get("validation_errors", []):
+        # Bucket the error type
+        if "shift" in e.lower():
+            key = "Invalid Shift Value"
+        elif "missing mandatory" in e.lower():
+            key = "Missing Mandatory Field"
+        elif "quantity" in e.lower():
+            key = "Quantity Issue"
+        elif "duplicate" in e.lower():
+            key = "Duplicate Work Order"
+        elif "machine" in e.lower():
+            key = "Machine Number Format"
+        elif "work order" in e.lower():
+            key = "Work Order Format"
+        else:
+            key = "Other"
+        error_counts[key] = error_counts.get(key, 0) + 1
+
+if error_counts:
+    df_err = pd.DataFrame({"Issue Type": list(error_counts.keys()), "Count": list(error_counts.values())})
+    df_err = df_err.sort_values("Count", ascending=False)
+    c1, c2 = st.columns([1,2])
+    with c1:
+        st.dataframe(df_err, use_container_width=True, hide_index=True)
+    with c2:
+        st.bar_chart(df_err.set_index("Issue Type"), height=220)
+else:
+    st.success("✅ No validation issues across all records!")
+
+st.divider()
+
+# ── Quantity trend ────────────────────────────────────────────────
+st.subheader("📈 Quantity Produced — All Records")
+qty_rows = [{"Record": f"#{r['id']}", "Qty": r.get("quantity_produced") or 0,
+             "Machine": r.get("machine_number") or "?",
+             "Shift": r.get("shift") or "?"}
+            for r in records if r.get("quantity_produced")]
+if qty_rows:
+    df_qty = pd.DataFrame(qty_rows)
+    st.bar_chart(df_qty.set_index("Record")["Qty"], height=220)
+
+    # Summary stats
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Total Qty Produced", f"{df_qty['Qty'].sum():.0f}")
+    s2.metric("Avg Qty per Record", f"{df_qty['Qty'].mean():.1f}")
+    s3.metric("Max Qty", f"{df_qty['Qty'].max():.0f}")
+    s4.metric("Min Qty", f"{df_qty['Qty'].min():.0f}")
+    
